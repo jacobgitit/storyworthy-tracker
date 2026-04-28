@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabaseClient";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
-const makeId = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 const prompts = [
   "First time I realized I was wrong",
@@ -41,7 +40,6 @@ function blankRatings() {
 
 function newMoment() {
   return {
-    id: makeId(),
     date: todayISO(),
     title: "",
     moment: "",
@@ -53,36 +51,8 @@ function newMoment() {
   };
 }
 
-function newStory(seed) {
-  return {
-    id: makeId(),
-    title: seed?.title || "Untitled story",
-    sourceMomentId: seed?.id || "",
-    before: "",
-    after: "",
-    fiveSecond: seed?.fiveSecond || "",
-    beginning: "",
-    middle: "",
-    ending: "",
-    elephant: "",
-    backpack: "",
-    breadcrumbs: "",
-    hourglass: "",
-    crystalBall: "",
-    humor: "",
-    cinema: seed?.place || "",
-    butTherefore: "",
-    dinnerTest: "",
-    draft: "",
-    presentTense: false,
-    ownStory: true,
-    ratings: blankRatings(),
-  };
-}
-
 function newPractice(storyId = "") {
   return {
-    id: makeId(),
     storyId,
     date: todayISO(),
     audience: "",
@@ -93,26 +63,85 @@ function newPractice(storyId = "") {
   };
 }
 
-function useLocalStorage(key, fallback) {
-  const [value, setValue] = useState(() => {
-    if (typeof window === "undefined") return fallback;
-    try {
-      const saved = window.localStorage.getItem(key);
-      return saved ? JSON.parse(saved) : fallback;
-    } catch {
-      return fallback;
-    }
-  });
+function mapMoment(row) {
+  return {
+    id: row.id,
+    date: row.date || todayISO(),
+    title: row.title || "",
+    moment: row.moment || "",
+    fiveSecond: row.five_second || "",
+    change: row.change || "",
+    place: row.place || "",
+    tags: row.tags || "",
+    potential: row.potential || 3,
+  };
+}
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(key, JSON.stringify(value));
-    } catch {
-      // Storage failed. The app still works for this session.
-    }
-  }, [key, value]);
+function mapStory(row) {
+  return {
+    id: row.id,
+    sourceMomentId: row.source_moment_id || "",
+    title: row.title || "Untitled story",
+    before: row.before || "",
+    after: row.after || "",
+    fiveSecond: row.five_second || "",
+    beginning: row.beginning || "",
+    middle: row.middle || "",
+    ending: row.ending || "",
+    elephant: row.elephant || "",
+    backpack: row.backpack || "",
+    breadcrumbs: row.breadcrumbs || "",
+    hourglass: row.hourglass || "",
+    crystalBall: row.crystal_ball || "",
+    humor: row.humor || "",
+    cinema: row.cinema || "",
+    butTherefore: row.but_therefore || "",
+    dinnerTest: row.dinner_test || "",
+    draft: row.draft || "",
+    presentTense: Boolean(row.present_tense),
+    ownStory: row.own_story !== false,
+    ratings: row.ratings && Object.keys(row.ratings).length ? row.ratings : blankRatings(),
+  };
+}
 
-  return [value, setValue];
+function mapPractice(row) {
+  return {
+    id: row.id,
+    storyId: row.story_id || "",
+    date: row.date || todayISO(),
+    audience: row.audience || "",
+    minutes: row.minutes || 5,
+    reps: row.reps || 1,
+    rating: row.rating || 3,
+    notes: row.notes || "",
+  };
+}
+
+function toStoryPatch(patch) {
+  const out = {};
+  if ("sourceMomentId" in patch) out.source_moment_id = patch.sourceMomentId || null;
+  if ("title" in patch) out.title = patch.title;
+  if ("before" in patch) out.before = patch.before;
+  if ("after" in patch) out.after = patch.after;
+  if ("fiveSecond" in patch) out.five_second = patch.fiveSecond;
+  if ("beginning" in patch) out.beginning = patch.beginning;
+  if ("middle" in patch) out.middle = patch.middle;
+  if ("ending" in patch) out.ending = patch.ending;
+  if ("elephant" in patch) out.elephant = patch.elephant;
+  if ("backpack" in patch) out.backpack = patch.backpack;
+  if ("breadcrumbs" in patch) out.breadcrumbs = patch.breadcrumbs;
+  if ("hourglass" in patch) out.hourglass = patch.hourglass;
+  if ("crystalBall" in patch) out.crystal_ball = patch.crystalBall;
+  if ("humor" in patch) out.humor = patch.humor;
+  if ("cinema" in patch) out.cinema = patch.cinema;
+  if ("butTherefore" in patch) out.but_therefore = patch.butTherefore;
+  if ("dinnerTest" in patch) out.dinner_test = patch.dinnerTest;
+  if ("draft" in patch) out.draft = patch.draft;
+  if ("presentTense" in patch) out.present_tense = patch.presentTense;
+  if ("ownStory" in patch) out.own_story = patch.ownStory;
+  if ("ratings" in patch) out.ratings = patch.ratings;
+  out.updated_at = new Date().toISOString();
+  return out;
 }
 
 function shortDate(date) {
@@ -260,11 +289,13 @@ export default function StoryworthyStorytellingTracker() {
   const [authEmail, setAuthEmail] = useState("");
   const [authLoading, setAuthLoading] = useState(true);
   const [authMessage, setAuthMessage] = useState("");
+  const [cloudLoading, setCloudLoading] = useState(false);
+  const [cloudError, setCloudError] = useState("");
 
   const [tab, setTab] = useState("dashboard");
-  const [moments, setMoments] = useLocalStorage("storyworthy_moments_v4", []);
-  const [stories, setStories] = useLocalStorage("storyworthy_stories_v4", []);
-  const [practices, setPractices] = useLocalStorage("storyworthy_practices_v4", []);
+  const [moments, setMoments] = useState([]);
+  const [stories, setStories] = useState([]);
+  const [practices, setPractices] = useState([]);
   const [momentForm, setMomentForm] = useState(newMoment());
   const [promptIndex, setPromptIndex] = useState(0);
   const [freewrite, setFreewrite] = useState("");
@@ -290,6 +321,11 @@ export default function StoryworthyStorytellingTracker() {
   }, []);
 
   useEffect(() => {
+    if (!session?.user?.id) return;
+    loadCloudData(session.user.id);
+  }, [session?.user?.id]);
+
+  useEffect(() => {
     if (!running) return undefined;
     if (seconds <= 0) {
       setRunning(false);
@@ -308,6 +344,34 @@ export default function StoryworthyStorytellingTracker() {
   const practiceMinutes = practices.reduce((sum, p) => sum + Number(p.minutes || 0), 0);
   const averageScore = stories.length ? Math.round(stories.reduce((sum, s) => sum + ratingScore(s), 0) / stories.length) : 0;
   const timerText = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+
+  async function loadCloudData(userId) {
+    setCloudLoading(true);
+    setCloudError("");
+
+    const [momentsResult, storiesResult, practicesResult] = await Promise.all([
+      supabase.from("story_moments").select("*").eq("user_id", userId).order("created_at", { ascending: false }),
+      supabase.from("stories").select("*").eq("user_id", userId).order("created_at", { ascending: false }),
+      supabase.from("practice_logs").select("*").eq("user_id", userId).order("created_at", { ascending: false }),
+    ]);
+
+    const firstError = momentsResult.error || storiesResult.error || practicesResult.error;
+    if (firstError) {
+      setCloudError(firstError.message);
+      setCloudLoading(false);
+      return;
+    }
+
+    const nextMoments = (momentsResult.data || []).map(mapMoment);
+    const nextStories = (storiesResult.data || []).map(mapStory);
+    const nextPractices = (practicesResult.data || []).map(mapPractice);
+
+    setMoments(nextMoments);
+    setStories(nextStories);
+    setPractices(nextPractices);
+    if (nextStories.length) setActiveStoryId(nextStories[0].id);
+    setCloudLoading(false);
+  }
 
   async function sendMagicLink(event) {
     event.preventDefault();
@@ -334,51 +398,191 @@ export default function StoryworthyStorytellingTracker() {
 
   async function signOut() {
     await supabase.auth.signOut();
+    setMoments([]);
+    setStories([]);
+    setPractices([]);
+    setActiveStoryId("");
   }
 
-  function saveMoment() {
+  async function saveMoment() {
+    const userId = session?.user?.id;
     const hasText = [momentForm.title, momentForm.moment, momentForm.fiveSecond, momentForm.change].some((x) => String(x || "").trim());
-    if (!hasText) return;
-    setMoments([{ ...momentForm, id: makeId() }, ...moments]);
+    if (!userId || !hasText) return;
+
+    setCloudError("");
+    const { data, error } = await supabase
+      .from("story_moments")
+      .insert({
+        user_id: userId,
+        date: momentForm.date,
+        title: momentForm.title,
+        moment: momentForm.moment,
+        five_second: momentForm.fiveSecond,
+        change: momentForm.change,
+        place: momentForm.place,
+        tags: momentForm.tags,
+        potential: momentForm.potential,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      setCloudError(error.message);
+      return;
+    }
+
+    setMoments([mapMoment(data), ...moments]);
     setMomentForm(newMoment());
   }
 
-  function createStory(seed = null) {
-    const story = newStory(seed);
+  async function deleteMoment(id) {
+    setCloudError("");
+    const { error } = await supabase.from("story_moments").delete().eq("id", id).eq("user_id", session.user.id);
+    if (error) {
+      setCloudError(error.message);
+      return;
+    }
+    setMoments(moments.filter((item) => item.id !== id));
+  }
+
+  async function createStory(seed = null) {
+    const userId = session?.user?.id;
+    if (!userId) return;
+
+    setCloudError("");
+    const { data, error } = await supabase
+      .from("stories")
+      .insert({
+        user_id: userId,
+        source_moment_id: seed?.id || null,
+        title: seed?.title || "Untitled story",
+        five_second: seed?.fiveSecond || "",
+        cinema: seed?.place || "",
+        own_story: true,
+        present_tense: false,
+        ratings: blankRatings(),
+      })
+      .select()
+      .single();
+
+    if (error) {
+      setCloudError(error.message);
+      return;
+    }
+
+    const story = mapStory(data);
     setStories([story, ...stories]);
     setActiveStoryId(story.id);
     setPracticeForm(newPractice(story.id));
     setTab("lab");
   }
 
-  function updateStory(patch) {
-    if (!activeStory) return;
-    setStories(stories.map((story) => (story.id === activeStory.id ? { ...story, ...patch } : story)));
+  async function updateStory(patch) {
+    if (!activeStory || !session?.user?.id) return;
+
+    const optimistic = { ...activeStory, ...patch };
+    setStories(stories.map((story) => (story.id === activeStory.id ? optimistic : story)));
+
+    const { error } = await supabase
+      .from("stories")
+      .update(toStoryPatch(patch))
+      .eq("id", activeStory.id)
+      .eq("user_id", session.user.id);
+
+    if (error) setCloudError(error.message);
   }
 
   function updateRating(key, value) {
     if (!activeStory) return;
-    updateStory({ ratings: { ...activeStory.ratings, [key]: value } });
+    const nextRatings = { ...activeStory.ratings, [key]: value };
+    updateStory({ ratings: nextRatings });
   }
 
-  function deleteStory(id) {
+  async function deleteStory(id) {
+    setCloudError("");
+    const { error } = await supabase.from("stories").delete().eq("id", id).eq("user_id", session.user.id);
+    if (error) {
+      setCloudError(error.message);
+      return;
+    }
     const nextStories = stories.filter((story) => story.id !== id);
     setStories(nextStories);
     setActiveStoryId(nextStories.length ? nextStories[0].id : "");
   }
 
-  function saveFreewrite() {
+  async function saveFreewrite() {
     if (!freewrite.trim()) return;
-    const seed = newMoment();
-    setMoments([{ ...seed, title: "Freewrite seed", moment: freewrite, tags: "freewrite", potential: 2 }, ...moments]);
+    const oldForm = momentForm;
+    const seed = { ...newMoment(), title: "Freewrite seed", moment: freewrite, tags: "freewrite", potential: 2 };
+    setMomentForm(seed);
     setFreewrite("");
+
+    const userId = session?.user?.id;
+    if (!userId) return;
+    const { data, error } = await supabase
+      .from("story_moments")
+      .insert({
+        user_id: userId,
+        date: seed.date,
+        title: seed.title,
+        moment: seed.moment,
+        five_second: seed.fiveSecond,
+        change: seed.change,
+        place: seed.place,
+        tags: seed.tags,
+        potential: seed.potential,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      setCloudError(error.message);
+      setMomentForm(oldForm);
+      return;
+    }
+
+    setMoments([mapMoment(data), ...moments]);
+    setMomentForm(oldForm);
   }
 
-  function savePractice() {
+  async function savePractice() {
+    const userId = session?.user?.id;
     const chosenId = practiceForm.storyId || stories[0]?.id || "";
-    if (!chosenId) return;
-    setPractices([{ ...practiceForm, id: makeId(), storyId: chosenId }, ...practices]);
+    if (!userId || !chosenId) return;
+
+    setCloudError("");
+    const { data, error } = await supabase
+      .from("practice_logs")
+      .insert({
+        user_id: userId,
+        story_id: chosenId,
+        date: practiceForm.date,
+        audience: practiceForm.audience,
+        minutes: practiceForm.minutes,
+        reps: practiceForm.reps,
+        rating: practiceForm.rating,
+        notes: practiceForm.notes,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      setCloudError(error.message);
+      return;
+    }
+
+    setPractices([mapPractice(data), ...practices]);
     setPracticeForm(newPractice(chosenId));
+  }
+
+  async function deletePractice(id) {
+    setCloudError("");
+    const { error } = await supabase.from("practice_logs").delete().eq("id", id).eq("user_id", session.user.id);
+    if (error) {
+      setCloudError(error.message);
+      return;
+    }
+    setPractices(practices.filter((p) => p.id !== id));
   }
 
   if (authLoading) {
@@ -398,11 +602,11 @@ export default function StoryworthyStorytellingTracker() {
         <div className="mx-auto mt-20 max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <p className="mb-2 inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-black uppercase tracking-wide text-slate-600">Storyworthy tracker</p>
           <h1 className="text-3xl font-black tracking-tight">Sign in</h1>
-          <p className="mt-2 text-sm leading-6 text-slate-600">Enter your email and Supabase will send you a magic link. No password needed.</p>
+          <p className="mt-2 text-sm leading-6 text-slate-600">Enter your email and Supabase will send you a Magic Link. Once you sign in, the app should keep you logged in on that device.</p>
 
           <form onSubmit={sendMagicLink} className="mt-6 space-y-4">
             <Field label="Email" type="email" value={authEmail} onChange={setAuthEmail} placeholder="you@example.com" />
-            <Button type="submit" className="w-full py-3">Send magic link</Button>
+            <Button type="submit" className="w-full py-3">Send Magic Link</Button>
           </form>
 
           {authMessage && <p className="mt-4 rounded-2xl bg-slate-50 p-3 text-sm font-bold text-slate-700">{authMessage}</p>}
@@ -428,10 +632,12 @@ export default function StoryworthyStorytellingTracker() {
               <p className="mb-2 inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-black uppercase tracking-wide text-slate-600">Storyworthy tracker</p>
               <h1 className="text-3xl font-black tracking-tight sm:text-4xl">Become a better storyteller, one true moment at a time.</h1>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">Capture daily moments, find the five-second turn, build stakes, practice delivery, and track your reps.</p>
-              <p className="mt-2 text-xs font-bold text-slate-500">Signed in as {session.user.email}</p>
+              <p className="mt-2 text-xs font-bold text-slate-500">Signed in as {session.user.email} · {cloudLoading ? "Syncing..." : "Cloud sync ready"}</p>
+              {cloudError && <p className="mt-2 rounded-2xl bg-rose-50 p-3 text-sm font-bold text-rose-700">Cloud error: {cloudError}</p>}
             </div>
             <div className="flex flex-wrap gap-2">
               <Button variant="light" onClick={() => downloadJson({ moments, stories, practices, exportedAt: new Date().toISOString() })}>Export JSON</Button>
+              <Button variant="light" onClick={() => loadCloudData(session.user.id)}>Refresh sync</Button>
               <Button variant="light" onClick={signOut}>Sign out</Button>
               <Button onClick={() => setTab("moments")}>Log today</Button>
             </div>
@@ -458,8 +664,8 @@ export default function StoryworthyStorytellingTracker() {
             {tab === "dashboard" && (
               <>
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                  <Stat label="Moments captured" value={moments.length} detail="Daily entries" />
-                  <Stat label="Stories in lab" value={stories.length} detail="Seeds being shaped" />
+                  <Stat label="Moments captured" value={moments.length} detail="Synced daily entries" />
+                  <Stat label="Stories in lab" value={stories.length} detail="Cloud story drafts" />
                   <Stat label="Practice minutes" value={practiceMinutes} detail="Logged telling reps" />
                   <Stat label="Current streak" value={streak} detail="Consecutive days" />
                 </div>
@@ -580,7 +786,7 @@ export default function StoryworthyStorytellingTracker() {
                           </div>
                           <div className="flex shrink-0 gap-2">
                             <Button variant="light" onClick={() => createStory(m)}>Shape</Button>
-                            <Button variant="danger" onClick={() => setMoments(moments.filter((item) => item.id !== m.id))}>Delete</Button>
+                            <Button variant="danger" onClick={() => deleteMoment(m.id)}>Delete</Button>
                           </div>
                         </div>
                       </div>
@@ -734,7 +940,7 @@ export default function StoryworthyStorytellingTracker() {
                               <p className="text-sm text-slate-600">{practice.minutes} min · {practice.reps} reps · Rating {practice.rating}/5</p>
                               {practice.notes && <p className="mt-2 text-sm leading-6 text-slate-600">{practice.notes}</p>}
                             </div>
-                            <Button variant="danger" onClick={() => setPractices(practices.filter((p) => p.id !== practice.id))}>Delete</Button>
+                            <Button variant="danger" onClick={() => deletePractice(practice.id)}>Delete</Button>
                           </div>
                         </div>
                       );
