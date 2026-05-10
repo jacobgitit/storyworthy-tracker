@@ -1,3 +1,4 @@
+import LoginPage from './LoginPage'
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabaseClient";
 
@@ -596,24 +597,9 @@ export default function StoryworthyStorytellingTracker() {
     );
   }
 
-  if (!session) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-6 text-slate-900">
-        <div className="mx-auto mt-20 max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="mb-2 inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-black uppercase tracking-wide text-slate-600">Storyworthy tracker</p>
-          <h1 className="text-3xl font-black tracking-tight">Sign in</h1>
-          <p className="mt-2 text-sm leading-6 text-slate-600">Enter your email and Supabase will send you a Magic Link. Once you sign in, the app should keep you logged in on that device.</p>
-
-          <form onSubmit={sendMagicLink} className="mt-6 space-y-4">
-            <Field label="Email" type="email" value={authEmail} onChange={setAuthEmail} placeholder="you@example.com" />
-            <Button type="submit" className="w-full py-3">Send Magic Link</Button>
-          </form>
-
-          {authMessage && <p className="mt-4 rounded-2xl bg-slate-50 p-3 text-sm font-bold text-slate-700">{authMessage}</p>}
-        </div>
-      </div>
-    );
-  }
+if (!session) {
+  return <LoginPage />
+}
 
   const tabs = [
     ["dashboard", "Dashboard"],
